@@ -1,0 +1,1223 @@
+---
+title: "<h2 style='margin-top: -90px;'>OCHIN Research Data Warehouse at a Glance</h2>"
+geometry: margin=0.7cm
+output:
+  pagedown::html_paged:
+    css: "theme.css"
+    toc: false
+    # change to true for a self-contained document, but it'll be a litte slower for Pandoc to render
+    self_contained: false
+execute: 
+  echo: false
+lot: false # insert a list of tables
+lof: false # insert a list of figures
+# uncomment this line to produce HTML and PDF in RStudio:
+knit: pagedown::chrome_print
+---
+
+```{r setup, include=FALSE, echo=false, output=false}
+#| echo: false
+#| warning: false
+#| output: false
+knitr::opts_chunk$set(echo = FALSE)
+library(tidyverse)
+library(lubridate)
+library(scales)
+library(usmap)
+library(odbc)
+library(gt)
+library(ggpubr)
+library(plotly)
+library(kableExtra)
+```
+
+```{r, include=FALSE, echo=false, output=false}
+#| echo: false
+#| warning: false
+#| output: false
+
+# Remove the existing PDF file if it exists
+if (file.exists("OCHIN_at_a_Glance_pgdwn_test.pdf")) {
+  file.remove("OCHIN_at_a_Glance_pgdwn_test.pdf")
+}
+```
+
+```{r, include=FALSE, echo=false, output=false}
+#| echo: false
+#| warning: false
+#| output: false
+
+# Connect to DB using Renviron file
+conn <- DBI::dbConnect(odbc::odbc(),
+                       Driver   = "SQL Server Native Client 11.0",
+                       Server   = "192.168.191.13",
+                       Database = "OCHIN",
+                       Port     = 1433,
+                       UID      = Sys.getenv("userid"),
+                       PWD      = Sys.getenv("password")
+                       )
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| output: false
+
+# All time patients
+all_ids_qry <- "SELECT COUNT(DISTINCT PATID)
+FROM CDM.dbo.ENCOUNTER
+WHERE SITEID = 'OCHIN'"
+all_ids <- dbGetQuery(conn, all_ids_qry)
+
+# Active patients, with an encounter in the last three years
+active_ids_qry <- "SELECT COUNT(DISTINCT PATID)
+FROM CDM.dbo.ENCOUNTER
+WHERE ADMIT_DATE > DATEADD(year,-3,GETDATE())
+AND SITEID = 'OCHIN'"
+active_ids <- dbGetQuery(conn, active_ids_qry)
+
+# Count of active health systems
+health_sys_qry <- "SELECT COUNT(DISTINCT HEALTHSYSTEMID)
+FROM OCHIN.dbo.ENCOUNTER"
+health_sys <- dbGetQuery(conn, health_sys_qry)
+
+# Count of clinic sites
+sites_qry <- "SELECT COUNT(DISTINCT site_id)
+FROM research_library.dbo.MASTER_CLINIC_SITE"
+sites <- dbGetQuery(conn, sites_qry)
+
+# Count of states with OCHIN sites
+states_qry <- "SELECT COUNT(DISTINCT FACILITY_STATE_ABBR)
+FROM OCHIN.dbo.ENCOUNTER"
+states <- dbGetQuery(conn, states_qry)
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| output: false
+# Total counts table
+allids <- format(as.integer(all_ids),big.mark=",",scientific=FALSE)
+allactiveids <- format(as.integer(active_ids),big.mark=",",scientific=FALSE)
+allclinics <- format(as.integer(sites),big.mark=",",scientific=FALSE)
+allhealthsystems <- format(as.integer(health_sys),big.mark=",",scientific=FALSE)
+allstates <- format(as.integer(states),big.mark=",",scientific=FALSE)
+
+first_column <- c("Total Patients*", "Active Patients**", "Clinic Sites*", "Health Systems*", "States with OCHIN Sites*")
+tbl_counts <- c(allids, allactiveids, allclinics, allhealthsystems, allstates)
+
+counts_df <- data.frame(first_column, tbl_counts)
+counts_tbl <- gt(counts_df)
+
+counts_tbl <- 
+  counts_tbl |>
+  tab_header(
+    title = md("**OCHIN RDW Overview**")
+  ) |>
+  tab_source_note(
+    source_note = "* Since January 1 2012"
+  ) |>
+  tab_source_note(
+    source_note = "** At least 1 visit in the last 3 years"
+  ) |>
+  cols_label(
+    first_column = "",
+    tbl_counts = ""
+  ) |>
+  tab_options(table.width = px(115),
+              data_row.padding = px(0.4),
+              summary_row.padding = px(0.4),
+              row_group.padding = px(0.4),
+              table.font.size = px(6L)
+              )
+```
+
+```{r, include=FALSE, echo=false, output=false, warning=FALSE}
+#| echo: false
+#| warning: false
+#| output: false
+
+# Total number of active patients per state, using patient address' state
+pts_state_qry <- "WITH StateData AS (
+  SELECT
+    CASE 
+	    WHEN STATE_C = '1' THEN 'AL'
+      WHEN STATE_C = '2' THEN 'AK'
+      WHEN STATE_C = '3' THEN 'AZ'
+      WHEN STATE_C = '4' THEN 'AR'
+      WHEN STATE_C = '5' THEN 'CA'
+      WHEN STATE_C = '6' THEN 'CO'
+      WHEN STATE_C = '7' THEN 'CT'
+      WHEN STATE_C = '8' THEN 'DE'
+      WHEN STATE_C = '10' THEN 'FL'
+      WHEN STATE_C = '11' THEN 'GA'
+      WHEN STATE_C = '12' THEN 'HI'
+      WHEN STATE_C = '13' THEN 'ID'
+      WHEN STATE_C = '14' THEN 'IL'
+      WHEN STATE_C = '15' THEN 'IN'
+      WHEN STATE_C = '16' THEN 'IA'
+      WHEN STATE_C = '17' THEN 'KS'
+      WHEN STATE_C = '18' THEN 'KY'
+      WHEN STATE_C = '19' THEN 'LA'
+      WHEN STATE_C = '20' THEN 'ME'
+      WHEN STATE_C = '21' THEN 'MD'
+      WHEN STATE_C = '22' THEN 'MA'
+      WHEN STATE_C = '23' THEN 'MI'
+      WHEN STATE_C = '24' THEN 'MN'
+      WHEN STATE_C = '25' THEN 'MS'
+      WHEN STATE_C = '26' THEN 'MO'
+      WHEN STATE_C = '27' THEN 'MT'
+      WHEN STATE_C = '28' THEN 'NE'
+      WHEN STATE_C = '29' THEN 'NV'
+      WHEN STATE_C = '30' THEN 'NH'
+      WHEN STATE_C = '31' THEN 'NJ'
+      WHEN STATE_C = '32' THEN 'NM'
+      WHEN STATE_C = '33' THEN 'NY'
+      WHEN STATE_C = '34' THEN 'NC'
+      WHEN STATE_C = '35' THEN 'ND'
+      WHEN STATE_C = '36' THEN 'OH'
+      WHEN STATE_C = '37' THEN 'OK'
+      WHEN STATE_C = '38' THEN 'OR'
+      WHEN STATE_C = '39' THEN 'PA'
+      WHEN STATE_C = '40' THEN 'RI'
+      WHEN STATE_C = '41' THEN 'SC'
+      WHEN STATE_C = '42' THEN 'SD'
+      WHEN STATE_C = '43' THEN 'TN'
+      WHEN STATE_C = '44' THEN 'TX'
+      WHEN STATE_C = '45' THEN 'UT'
+      WHEN STATE_C = '46' THEN 'VT'
+      WHEN STATE_C = '47' THEN 'VA'
+      WHEN STATE_C = '48' THEN 'WA'
+      WHEN STATE_C = '49' THEN 'WV'
+      WHEN STATE_C = '50' THEN 'WI'
+      WHEN STATE_C = '51' THEN 'WY'
+      ELSE NULL
+    END AS state,
+    PAT_ID
+  FROM Clarity.dbo.patient
+)
+SELECT
+  state,
+  COUNT(DISTINCT PAT_ID) AS PATID_COUNT
+FROM StateData
+WHERE state IS NOT NULL
+GROUP BY state
+ORDER BY state"
+pt_state <- dbGetQuery(conn, pts_state_qry)
+
+# Patient distribution by state map
+state_map <- 
+plot_usmap(data = pt_state, values = "PATID_COUNT", color = "white") +
+  scale_fill_gradient(
+    low = "#d4e3f2", # Light blue for low data
+    high = "#44446e", # Dark purple for high data
+    na.value = "#F0F0F0", # Very light grey for missing states
+    name = "Patient Count",
+    labels = scales::comma
+  ) +
+  theme(legend.position = "right",
+        legend.text = element_text(size = 15),
+        legend.title = element_text(face = "bold", size = 16)) +
+  labs(title = "Patient Distribution by State") +
+  theme(plot.title = element_text(face = "bold", size = 20, hjust = 0.5))
+```
+
+```{r, include=FALSE, echo=false, output=false, warning=FALSE}
+#| echo: false
+#| warning: false
+#| output: false
+
+# Total number of active patients per state, using facility' state
+pts_facility_qry <- "SELECT FACILITY_STATE_ABBR, COUNT(DISTINCT PATID) AS PATID_COUNT
+FROM OCHIN.dbo.ENCOUNTER
+WHERE FACILITY_STATE_ABBR IS NOT NULL
+GROUP BY FACILITY_STATE_ABBR
+ORDER BY FACILITY_STATE_ABBR"
+pt_facility_state <- dbGetQuery(conn, pts_facility_qry)
+
+# Patient distribution by facility state map
+
+colnames(pt_facility_state)[colnames(pt_facility_state) == "FACILITY_STATE_ABBR"] ="state"
+facility_state_map <- 
+plot_usmap(data = pt_facility_state, values = "PATID_COUNT", color = "white") +
+  scale_fill_gradient(
+    low = "#d4e3f2", # Light blue for low data
+    high = "#44446e", # Dark purple for high data
+    na.value = "#F0F0F0", # Very light grey for missing states
+    name = "Patient Count",
+    labels = scales::comma
+  ) +
+  theme(legend.position = "right",
+        legend.text = element_text(size = 15),
+        legend.title = element_text(face = "bold", size = 16)) +
+  labs(title = "Patient Distribution by Facility's State") +
+  theme(plot.title = element_text(face = "bold", size = 20, hjust = 0.5))
+```
+
+```{r, include=FALSE, echo=false, output=false, warning=FALSE}
+#| echo: false
+#| warning: false
+#| output: false
+
+# Total number of patients by year
+pt_cnt_qry <- "SELECT DISTINCT YEAR(ADMIT_DATE) AS year, COUNT(DISTINCT PATID) AS patid_count
+FROM CDM.dbo.ENCOUNTER
+WHERE (YEAR(ADMIT_DATE) > 2001) AND (YEAR(ADMIT_DATE) < YEAR(GETDATE()))
+AND SITEID = 'OCHIN'
+GROUP BY YEAR(ADMIT_DATE)
+ORDER BY YEAR(ADMIT_DATE) DESC"
+pt_cnt <- dbGetQuery(conn, pt_cnt_qry)
+
+# Total number of health system by year
+hs_cnt_qry <- "SELECT DISTINCT YEAR(ADMIT_DATE) AS year, COUNT(DISTINCT HEALTHSYSTEMID) AS health_systems
+FROM OCHIN.dbo.ENCOUNTER
+WHERE (YEAR(ADMIT_DATE) > 2001) AND (YEAR(ADMIT_DATE) < YEAR(GETDATE()))
+GROUP BY YEAR(ADMIT_DATE)
+ORDER BY YEAR(ADMIT_DATE) DESC"
+hs_cnt <- dbGetQuery(conn, hs_cnt_qry)
+
+# Patient and health system line graph
+hs_pt_df <- merge(hs_cnt, pt_cnt, by = 'year')
+
+combined_chart <- ggplot(hs_pt_df, aes(year)) +
+  geom_line(aes(y = health_systems, color = "Health Systems"), size = 1) +
+  geom_col(aes(y = patid_count / max(patid_count) * max(health_systems), fill = "Patient Count"), width = 1, alpha = 0.7) +
+  scale_color_manual(values = "#F77F00") +
+  scale_fill_manual(values = "#568e14") +
+  labs(x = "Year", y = "Health Systems", fill = "Patient Count") +
+  theme_bw() +
+  theme(legend.position = "top",
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 16),
+        axis.text.x = element_text(size = 16),
+        axis.text.y = element_text(size = 16)) +
+  scale_y_continuous(
+    sec.axis = sec_axis(
+      ~ . * max(hs_pt_df$patid_count) / max(hs_pt_df$health_systems),
+      name = "Patients",
+      labels = scales::comma_format(scale = 1e-6, suffix = "M")
+    )
+  ) +
+  scale_x_continuous(limits = c(2000, max(hs_pt_df$year))) +
+  labs(title = "Patient and Health System Count Over Time") +
+  theme(
+    plot.title = element_text(face = "bold", size = 20, hjust = 0.5),
+    legend.text = element_text(size = 16),
+    axis.text.x = element_text(size = 16),
+    axis.text.y = element_text(size = 16),
+    axis.text.y.right = element_text(margin = margin(r = 5))
+  ) +
+  labs(color = "", fill = "")
+```
+
+```{r, include=FALSE, echo=false, output=false, warning=FALSE}
+#| echo: false
+#| warning: false
+#| output: false
+
+age_groups_qry <- "SELECT 
+	CASE 
+		 WHEN Person_Age <= 20 THEN '0-20'
+		 WHEN Person_Age > 20 AND Person_Age <= 30 THEN '21-30'
+		 WHEN Person_Age > 30 AND Person_Age <= 40 THEN '31-40'
+		 WHEN Person_Age > 40 AND Person_Age <= 50 THEN '41-50'
+		 WHEN Person_Age > 50 AND Person_Age <= 60 THEN '51-60'
+		 WHEN Person_Age > 60 AND Person_Age <= 70 THEN '61-70'
+		 WHEN Person_Age > 70 AND Person_Age <= 80 THEN '71-80'
+		 ELSE '81+'
+    END AS 'Age',
+COUNT(DISTINCT PATID) AS age_pat_count
+FROM CDM.dbo.DEMOGRAPHIC 
+CROSS APPLY (
+    SELECT DATEDIFF(YEAR, BIRTH_DATE, GETDATE()) - 
+        CASE WHEN CONVERT(char(5), BIRTH_DATE, 1) >
+                  CONVERT(char(5), GETDATE(), 1) THEN 1 ELSE 0 
+        END AS [Person_Age]
+) AS ca1
+WHERE SITES = 'OCHIN'
+GROUP BY 
+	CASE
+		 WHEN Person_Age <= 20 THEN '0-20'
+		 WHEN Person_Age > 20 AND Person_Age <= 30 THEN '21-30'
+		 WHEN Person_Age > 30 AND Person_Age <= 40 THEN '31-40'
+		 WHEN Person_Age > 40 AND Person_Age <= 50 THEN '41-50'
+		 WHEN Person_Age > 50 AND Person_Age <= 60 THEN '51-60'
+		 WHEN Person_Age > 60 AND Person_Age <= 70 THEN '61-70'
+		 WHEN Person_Age > 70 AND Person_Age <= 80 THEN '71-80'
+		 ELSE '81+'
+    END
+ORDER BY Age"
+age_groups <- dbGetQuery(conn, age_groups_qry)
+
+# Patient distribution by age group bar graph
+age_groups_total <- sum(age_groups$age_pat_count)
+age_groups_total <- (format(age_groups_total,big.mark=",",scientific=FALSE))
+
+age_groups$age_label = paste0(round(((age_groups$age_pat_count/sum(age_groups$age_pat_count)) * 100), digits = 1), "%")
+age_groups$count_label = format(as.integer(age_groups$age_pat_count),big.mark=",",scientific=FALSE)
+  
+age_groups_bar <- 
+  ggplot(age_groups, aes(x = Age, y = age_pat_count, text = count_label)) + 
+  geom_bar(stat = "identity", fill = "#39657a")+
+  geom_text(aes(label = age_label), nudge_y = 90000, size = 5)+
+  theme_classic() +
+  theme(legend.position = "none")+
+  theme(axis.text.x = element_text(size = 16),
+        axis.text.y = element_text(size = 16),
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16)) +
+  xlab("Age") +
+  ylab("Patient Count") +
+  labs(title="Patient Distribution by Age Group",
+       subtitle = paste0("n = ", age_groups_total)) +
+  theme(plot.title = element_text(face = "bold", size = 20, hjust = 0.5),
+        plot.subtitle= element_text(size = 16, hjust = 0.5)) +
+  scale_y_continuous(labels = scales::comma_format(scale = 1e-6, suffix = "M"))
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| output: false
+
+# Patient count by race
+race_nonhispanic_qry <- "SELECT 
+	CASE 
+	  WHEN RACE = '01' THEN 'American Indian / Alaska Native'
+	  WHEN RACE = '02' THEN 'Asian'
+	  WHEN RACE = '03' THEN 'Black or African American'
+	  WHEN RACE = '04' THEN 'Native Hawaiian / Pacific Islander'
+	  WHEN RACE = '05' THEN 'White'
+	  WHEN RACE = '06' THEN 'Multiple race'
+	  WHEN RACE = '07' THEN 'Refuse to Answer'
+	  WHEN RACE = 'NI' THEN 'No Information'
+	  WHEN RACE = 'OT' THEN 'Other'
+	ELSE 'Unknown'
+	END AS 'race',
+COUNT(DISTINCT PATID) AS 'NotHispanic'
+FROM CDM.dbo.DEMOGRAPHIC
+WHERE SITES = 'OCHIN'
+AND HISPANIC = 'N'
+GROUP BY 	
+	CASE
+	  WHEN RACE = '01' THEN 'American Indian / Alaska Native'
+	  WHEN RACE = '02' THEN 'Asian'
+	  WHEN RACE = '03' THEN 'Black or African American'
+	  WHEN RACE = '04' THEN 'Native Hawaiian / Pacific Islander'
+	  WHEN RACE = '05' THEN 'White'
+	  WHEN RACE = '06' THEN 'Multiple race'
+	  WHEN RACE = '07' THEN 'Refuse to Answer'
+	  WHEN RACE = 'NI' THEN 'No Information'
+	  WHEN RACE = 'OT' THEN 'Other'
+	ELSE 'Unknown'
+END"
+race_nonhispanic <- dbGetQuery(conn, race_nonhispanic_qry)
+
+race_hispanic_qry <- "SELECT 
+	CASE 
+	  WHEN RACE = '01' THEN 'American Indian / Alaska Native'
+	  WHEN RACE = '02' THEN 'Asian'
+	  WHEN RACE = '03' THEN 'Black or African American'
+	  WHEN RACE = '04' THEN 'Native Hawaiian / Pacific Islander'
+	  WHEN RACE = '05' THEN 'White'
+	  WHEN RACE = '06' THEN 'Multiple race'
+	  WHEN RACE = '07' THEN 'Refuse to Answer'
+	  WHEN RACE = 'NI' THEN 'No Information'
+	  WHEN RACE = 'OT' THEN 'Other'
+	ELSE 'Unknown'
+	END AS 'race',
+COUNT(DISTINCT PATID) AS 'Hispanic'
+FROM CDM.dbo.DEMOGRAPHIC
+WHERE SITES = 'OCHIN'
+AND HISPANIC = 'Y'
+GROUP BY 	
+	CASE
+	  WHEN RACE = '01' THEN 'American Indian / Alaska Native'
+	  WHEN RACE = '02' THEN 'Asian'
+	  WHEN RACE = '03' THEN 'Black or African American'
+	  WHEN RACE = '04' THEN 'Native Hawaiian / Pacific Islander'
+	  WHEN RACE = '05' THEN 'White'
+	  WHEN RACE = '06' THEN 'Multiple race'
+	  WHEN RACE = '07' THEN 'Refuse to Answer'
+	  WHEN RACE = 'NI' THEN 'No Information'
+	  WHEN RACE = 'OT' THEN 'Other'
+	ELSE 'Unknown'
+END"
+race_hispanic <- dbGetQuery(conn, race_hispanic_qry)
+
+race_unkhispanic_qry <- "SELECT 
+	CASE 
+	  WHEN RACE = '01' THEN 'American Indian / Alaska Native'
+	  WHEN RACE = '02' THEN 'Asian'
+	  WHEN RACE = '03' THEN 'Black or African American'
+	  WHEN RACE = '04' THEN 'Native Hawaiian / Pacific Islander'
+	  WHEN RACE = '05' THEN 'White'
+	  WHEN RACE = '06' THEN 'Multiple race'
+	  WHEN RACE = '07' THEN 'Refuse to Answer'
+	  WHEN RACE = 'NI' THEN 'No Information'
+	  WHEN RACE = 'OT' THEN 'Other'
+	ELSE 'Unknown'
+	END AS 'race',
+COUNT(DISTINCT PATID) AS 'UnknownEthnicity'
+FROM CDM.dbo.DEMOGRAPHIC
+WHERE SITES = 'OCHIN'
+AND HISPANIC = 'UN'
+GROUP BY 	
+	CASE
+	  WHEN RACE = '01' THEN 'American Indian / Alaska Native'
+	  WHEN RACE = '02' THEN 'Asian'
+	  WHEN RACE = '03' THEN 'Black or African American'
+	  WHEN RACE = '04' THEN 'Native Hawaiian / Pacific Islander'
+	  WHEN RACE = '05' THEN 'White'
+	  WHEN RACE = '06' THEN 'Multiple race'
+	  WHEN RACE = '07' THEN 'Refuse to Answer'
+	  WHEN RACE = 'NI' THEN 'No Information'
+	  WHEN RACE = 'OT' THEN 'Other'
+	ELSE 'Unknown'
+END"
+race_unkhispanic <- dbGetQuery(conn, race_unkhispanic_qry)
+
+race_nihispanic_qry <- "SELECT 
+	CASE 
+	  WHEN RACE = '01' THEN 'American Indian / Alaska Native'
+	  WHEN RACE = '02' THEN 'Asian'
+	  WHEN RACE = '03' THEN 'Black or African American'
+	  WHEN RACE = '04' THEN 'Native Hawaiian / Pacific Islander'
+	  WHEN RACE = '05' THEN 'White'
+	  WHEN RACE = '06' THEN 'Multiple race'
+	  WHEN RACE = '07' THEN 'Refuse to Answer'
+	  WHEN RACE = 'NI' THEN 'No Information'
+	  WHEN RACE = 'OT' THEN 'Other'
+	ELSE 'Unknown'
+	END AS 'race',
+COUNT(DISTINCT PATID) AS 'NoInformation'
+FROM CDM.dbo.DEMOGRAPHIC
+WHERE SITES = 'OCHIN'
+AND HISPANIC = 'NI'
+GROUP BY 	
+	CASE
+	  WHEN RACE = '01' THEN 'American Indian / Alaska Native'
+	  WHEN RACE = '02' THEN 'Asian'
+	  WHEN RACE = '03' THEN 'Black or African American'
+	  WHEN RACE = '04' THEN 'Native Hawaiian / Pacific Islander'
+	  WHEN RACE = '05' THEN 'White'
+	  WHEN RACE = '06' THEN 'Multiple race'
+	  WHEN RACE = '07' THEN 'Refuse to Answer'
+	  WHEN RACE = 'NI' THEN 'No Information'
+	  WHEN RACE = 'OT' THEN 'Other'
+	ELSE 'Unknown'
+END"
+race_nihispanic <- dbGetQuery(conn, race_nihispanic_qry)
+
+race_refhispanic_qry <- "SELECT 
+	CASE 
+	  WHEN RACE = '01' THEN 'American Indian / Alaska Native'
+	  WHEN RACE = '02' THEN 'Asian'
+	  WHEN RACE = '03' THEN 'Black or African American'
+	  WHEN RACE = '04' THEN 'Native Hawaiian / Pacific Islander'
+	  WHEN RACE = '05' THEN 'White'
+	  WHEN RACE = '06' THEN 'Multiple race'
+	  WHEN RACE = '07' THEN 'Refuse to Answer'
+	  WHEN RACE = 'NI' THEN 'No Information'
+	  WHEN RACE = 'OT' THEN 'Other'
+	ELSE 'Unknown'
+	END AS 'race',
+COUNT(DISTINCT PATID) AS 'RefusetoAnswer'
+FROM CDM.dbo.DEMOGRAPHIC
+WHERE SITES = 'OCHIN'
+AND HISPANIC = 'R'
+GROUP BY 	
+	CASE
+	  WHEN RACE = '01' THEN 'American Indian / Alaska Native'
+	  WHEN RACE = '02' THEN 'Asian'
+	  WHEN RACE = '03' THEN 'Black or African American'
+	  WHEN RACE = '04' THEN 'Native Hawaiian / Pacific Islander'
+	  WHEN RACE = '05' THEN 'White'
+	  WHEN RACE = '06' THEN 'Multiple race'
+	  WHEN RACE = '07' THEN 'Refuse to Answer'
+	  WHEN RACE = 'NI' THEN 'No Information'
+	  WHEN RACE = 'OT' THEN 'Other'
+	ELSE 'Unknown'
+END"
+race_refhispanic <- dbGetQuery(conn, race_refhispanic_qry)
+
+race_ethnicity <- merge(merge(merge(merge(race_nonhispanic, race_hispanic, by="race"), race_unkhispanic, by="race"), race_nihispanic, by="race"), race_refhispanic, by="race")
+
+sum_row <- colSums(race_ethnicity[,-1])
+total_row <- c("Total", sum_row)
+race_ethnicity <- rbind(race_ethnicity, total_row)
+
+race_ethnicity$NotHispanic <- as.numeric(race_ethnicity$NotHispanic)
+race_ethnicity$Hispanic <- as.numeric(race_ethnicity$Hispanic)
+race_ethnicity$UnknownEthnicity <- as.numeric(race_ethnicity$UnknownEthnicity)
+race_ethnicity$NoInformation <- as.numeric(race_ethnicity$NoInformation)
+race_ethnicity$RefusetoAnswer <- as.numeric(race_ethnicity$RefusetoAnswer)
+race_ethnicity$Total <- rowSums(race_ethnicity[,-1])
+
+total_row_index <- which(race_ethnicity$race == "Total")
+total_col_index <- which(colnames(race_ethnicity) == "Total")
+total_sum <- race_ethnicity[total_row_index,total_col_index]
+percentage_row <-(sum_row/total_sum) * 100
+percent_row <- c("% Across All Races", percentage_row)
+race_ethnicity <- rbind(race_ethnicity, percent_row)
+
+race_ethnicity$Total <- as.numeric(race_ethnicity$Total)
+race_ethnicity$Percentage <- (race_ethnicity$Total / total_sum) * 100
+
+row_index <- which(race_ethnicity$race == "% Across All Races")
+col_index <- which(colnames(race_ethnicity) == "Total")
+numeric_values <- as.numeric(race_ethnicity[row_index, ])
+sumrow <- sum(numeric_values, na.rm = TRUE)
+race_ethnicity[row_index, col_index] <- sumrow
+
+race_ethnicity$NotHispanic = format(as.integer(race_ethnicity$NotHispanic),big.mark=",",scientific=FALSE)
+race_ethnicity$Hispanic = format(as.integer(race_ethnicity$Hispanic),big.mark=",",scientific=FALSE)
+race_ethnicity$UnknownEthnicity = format(as.integer(race_ethnicity$UnknownEthnicity),big.mark=",",scientific=FALSE)
+race_ethnicity$NoInformation = format(as.integer(race_ethnicity$NoInformation),big.mark=",",scientific=FALSE)
+race_ethnicity$RefusetoAnswer = format(as.integer(race_ethnicity$RefusetoAnswer),big.mark=",",scientific=FALSE)
+race_ethnicity$Total = format(as.integer(race_ethnicity$Total),big.mark=",",scientific=FALSE)
+race_ethnicity$Percentage = paste0(round(race_ethnicity$Percentage, digits = 1), "%")
+
+race_ethnicity[race_ethnicity$race == "% Across All Races", "NotHispanic"] <- paste0(round(as.integer(race_ethnicity[race_ethnicity$race == "% Across All Races", "NotHispanic"]), digits = 1), "%")
+race_ethnicity[race_ethnicity$race == "% Across All Races", "Hispanic"] <- paste0(round(as.integer(race_ethnicity[race_ethnicity$race == "% Across All Races", "Hispanic"]), digits = 1), "%")
+race_ethnicity[race_ethnicity$race == "% Across All Races", "UnknownEthnicity"] <- paste0(round(as.integer(race_ethnicity[race_ethnicity$race == "% Across All Races", "UnknownEthnicity"]), digits = 1), "%")
+race_ethnicity[race_ethnicity$race == "% Across All Races", "NoInformation"] <- paste0(round(as.integer(race_ethnicity[race_ethnicity$race == "% Across All Races", "NoInformation"]), digits = 1), "%")
+race_ethnicity[race_ethnicity$race == "% Across All Races", "RefusetoAnswer"] <- paste0(round(as.integer(race_ethnicity[race_ethnicity$race == "% Across All Races", "RefusetoAnswer"]), digits = 1), "%")
+race_ethnicity[race_ethnicity$race == "% Across All Races", "Total"] <- paste0(round(as.integer(race_ethnicity[race_ethnicity$race == "% Across All Races", "Total"]), digits = 1), "%")
+
+race_ethnicity[12,8] <- ""
+
+race_ethnicity <-
+  race_ethnicity |> 
+  rename(
+    "Race & Ethnicity" = race,
+    "Not Hispanic" = NotHispanic,
+    "Unknown Ethnicity" = UnknownEthnicity,
+    "No Information" = NoInformation,
+    "Refuse to Answer" = RefusetoAnswer,
+    "% Accross All Ethnicities" = Percentage,
+    )
+
+race_ethnicity_tbl <- 
+  kable(race_ethnicity, format = "html", table.attr = "style='width:40%; font-size:5px; line-height: 4px;'") |> 
+  kable_classic(full_width = F) |>
+  add_header_above(c("Race & Ethnicity" = 8),
+                    font_size = 7) |>
+  row_spec(0, bold = TRUE) 
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| output: false
+
+# Top 10 chronic conditions
+cc_qry <- "SELECT ConditionDescription, condition_pat_count
+FROM (
+    SELECT b.ConditionDescription, 
+        COUNT(DISTINCT a.PATID) AS condition_pat_count,
+        RANK() OVER (ORDER BY COUNT(DISTINCT a.PATID) DESC) AS rnk
+    FROM CDM.dbo.CONDITION a
+    INNER JOIN research_library.dbo.CHRONIC_CONDITION_DX_GROUPERS b ON a.CONDITION = b.Code
+        AND (
+            (b.CodeType = 'ICD9' AND a.CONDITION_TYPE = '09') OR
+            (b.CodeType = 'ICD10' AND a.CONDITION_TYPE = '10')
+        )
+    WHERE a.CONDITION_STATUS = 'AC'
+    AND a.SITEID = 'OCHIN'
+    GROUP BY b.ConditionDescription
+) AS top_conditions
+WHERE rnk <= 10"
+chr_c <- dbGetQuery(conn, cc_qry)
+
+# Bar graph of 10 most prevalent chronic conditions
+cc_total <- as.integer(all_ids)
+chr_c$percent <- round((chr_c$condition_pat_count / cc_total) * 100, digits = 1)
+
+cc_total <- (format(cc_total,big.mark=",",scientific=FALSE))
+chr_c$ConditionDescription <- gsub("_", " ",chr_c$ConditionDescription)
+
+
+chr_c_bar <- chr_c |>
+  mutate(ConditionDescription = fct_reorder(ConditionDescription, condition_pat_count)) |>
+  ggplot( aes(x=ConditionDescription, y= condition_pat_count)) +
+  geom_bar(stat="identity", fill="#69698B", width=0.9) +
+  coord_flip() +
+  theme_void() +
+  labs(title="Top 10 Chronic Conditions",
+       subtitle = paste0("n = ", cc_total)) +
+  geom_text(
+    aes(label = paste0(percent, "%")), size = 5, nudge_y = 130000)+
+  scale_y_continuous(expand=expansion(mult=c(0.05,0.18)),labels = scales::comma_format(scale = 1e-6, suffix = "M"))+
+  theme(axis.text.y = element_text(size=16),
+        plot.title = element_text(face="bold", size=18, hjust = 0.5),
+        plot.subtitle= element_text(size = 16, hjust = 0.5))+
+  scale_x_discrete(labels = label_wrap(30))
+```
+
+```{r, include=FALSE, echo=false, output=false, warning=FALSE}
+#| echo: false
+#| warning: false
+#| output: false
+
+# Active patient count by sex assigned at birth 
+sex_qry <- "SELECT 
+CASE
+	WHEN SEX = 'F' THEN 'Female'
+	WHEN SEX = 'M' THEN 'Male'
+	ELSE 'Other/Unknown'
+END AS sex,
+COUNT(DISTINCT PATID) AS sex_pat_count
+FROM CDM.dbo.DEMOGRAPHIC 
+ WHERE SITES = 'OCHIN'
+ GROUP BY 
+ CASE
+	WHEN SEX = 'F' THEN 'Female'
+	WHEN SEX = 'M' THEN 'Male'
+	ELSE 'Other/Unknown'
+	END"
+sex <- dbGetQuery(conn, sex_qry)
+
+# Sex assigned at birth donut chart
+sex_total <- sum(sex$sex_pat_count)
+sex_total <- (format(sex_total,big.mark=",",scientific=FALSE))
+
+sex$fraction = sex$sex_pat_count / sum(sex$sex_pat_count)
+sex$percent = sex$sex_pat_count / sum(sex$sex_pat_count) * 100
+sex$ymax = cumsum(sex$fraction)
+sex$ymin = c(0, head(sex$ymax, n = -1))
+
+sex$labelPosition = (sex$ymax+sex$ymin) / 2
+sex$label = paste0(round(sex$percent, digits = 1), "%")
+
+sex_atbirth_donut <- 
+  ggplot(sex, aes(
+  ymax = ymax, ymin = ymin, xmax = 4, xmin = 3, fill = sex)) +
+  geom_rect() +
+  scale_fill_manual(values = c("#F77F00","#568e14","#69698B"),
+                    name = "Sex") +
+  coord_polar(theta = "y") +
+  xlim(c(2, 4)) +
+  theme_void() +
+  labs(title="Sex Assigned at Birth",
+       subtitle = paste0("n = ", sex_total)) +
+  theme(plot.title = element_text(face = "bold", size = 20, hjust = 0.5),
+        plot.subtitle= element_text(size = 16, hjust = 0.5),
+        legend.text = element_text(size = 16),
+        legend.title = element_text(face = "bold", size = 16)) +
+  geom_text(aes(y = labelPosition, label = label), x = 3.5, size = 6, color = "black", face = "bold")
+
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| output: false
+
+# Active patient count by preferred language
+language_qry<- "SELECT
+	CASE 
+		WHEN PAT_PREF_LANGUAGE_SPOKEN = 'ENG' THEN 'English'
+		WHEN PAT_PREF_LANGUAGE_SPOKEN = 'SPA' THEN 'Spanish'
+		WHEN PAT_PREF_LANGUAGE_SPOKEN IN ('UN','NI','X') THEN 'Unknown'
+	ELSE 'Other'
+END AS language,
+COUNT(DISTINCT PATID) AS lang_pat_count
+FROM CDM.dbo.DEMOGRAPHIC 
+WHERE SITES = 'OCHIN'
+GROUP BY 
+	CASE 
+		WHEN PAT_PREF_LANGUAGE_SPOKEN = 'ENG' THEN 'English'
+		WHEN PAT_PREF_LANGUAGE_SPOKEN = 'SPA' THEN 'Spanish'
+		WHEN PAT_PREF_LANGUAGE_SPOKEN IN ('UN','NI','X') THEN 'Unknown'
+	ELSE 'Other'
+END
+ORDER BY language"
+language <- dbGetQuery(conn, language_qry)
+
+# Preferred language donut chart
+language_total <- sum(language$lang_pat_count)
+language_total <- (format(language_total,big.mark=",",scientific=FALSE))
+
+language$fraction = language$lang_pat_count / sum(language$lang_pat_count)
+language$percent = language$lang_pat_count / sum(language$lang_pat_count) * 100
+language$ymax = cumsum(language$fraction)
+language$ymin = c(0, head(language$ymax, n = -1))
+
+language$labelPosition = (language$ymax+language$ymin) / 2
+language$label = paste0(round(language$percent, digits = 1), "%")
+
+lang_type <- 
+  ggplot(language, aes(
+  ymax = ymax, ymin = ymin, xmax = 4, xmin = 3, fill = language)) +
+  geom_rect() +
+  scale_fill_manual(values = c("#42a7a5","#cce226","#F77F00","#69698B"),
+                    name = "Language") +
+  coord_polar(theta = "y") +
+  xlim(c(2, 4)) +
+  theme_void() +
+  labs(title = "Preferred Language",
+       subtitle = paste0("n = ", language_total)) +
+  theme(plot.title = element_text(face = "bold", size = 20, hjust = 0.5),
+        plot.subtitle= element_text(size = 16, hjust = 0.5),
+        legend.text = element_text(size = 15),
+        legend.title = element_text(face = "bold", size = 16)) +
+  geom_text(aes(y = labelPosition, label = label), x = 3.5, size = 6, color = "black")
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| output: false
+
+# Active patient count by insurance type
+insurance_qry <- "SELECT 
+	CASE 
+		WHEN CURRENT_PRIMARY_PAYOR_TYPE = 'Medicaid' THEN 'Medicaid'
+		WHEN CURRENT_PRIMARY_PAYOR_TYPE = 'Uninsured' THEN 'Uninsured'
+		WHEN CURRENT_PRIMARY_PAYOR_TYPE = 'Medicare' THEN 'Medicare'
+		WHEN CURRENT_PRIMARY_PAYOR_TYPE = 'Private Insurance' THEN 'Private Insurance'
+		ELSE 'Other/Unknown'
+	END AS 'insurance',
+COUNT(DISTINCT PATID) AS ins_pat_count
+FROM CDM.dbo.DEMOGRAPHIC 
+WHERE SITES = 'OCHIN'
+GROUP BY 	
+	CASE
+		WHEN CURRENT_PRIMARY_PAYOR_TYPE = 'Medicaid' THEN 'Medicaid'
+		WHEN CURRENT_PRIMARY_PAYOR_TYPE = 'Uninsured' THEN 'Uninsured'
+		WHEN CURRENT_PRIMARY_PAYOR_TYPE = 'Medicare' THEN 'Medicare'
+		WHEN CURRENT_PRIMARY_PAYOR_TYPE = 'Private Insurance' THEN 'Private Insurance'
+		ELSE 'Other/Unknown'
+END"
+insurance <- dbGetQuery(conn, insurance_qry)
+
+# Insurance type donut chart
+insurance_total <- sum(insurance$ins_pat_count)
+insurance_total <- (format(insurance_total,big.mark=",",scientific=FALSE))
+
+insurance$fraction = insurance$ins_pat_count / sum(insurance$ins_pat_count)
+insurance$percent = insurance$ins_pat_count / sum(insurance$ins_pat_count) * 100
+insurance$ymax = cumsum(insurance$fraction)
+insurance$ymin = c(0, head(insurance$ymax, n = -1))
+
+insurance$labelPosition = (insurance$ymax+insurance$ymin) / 2
+insurance$label = paste0(round(insurance$percent, digits = 1), "%")
+
+ins_type <- 
+  ggplot(insurance, aes(
+  ymax = ymax, ymin = ymin, xmax = 4, xmin = 3, fill = insurance)) +
+  geom_rect() +
+  scale_fill_manual(values = c("#F77F00","#42a7a5","#cce226","#d4e3f2","#69698B"),
+                    name = "Primary Payor Type") +
+  coord_polar(theta = "y") +
+  xlim(c(2, 4)) +
+  theme_void() +
+  labs(title = "Payer Mix",
+       subtitle = paste0("n = ", insurance_total)) +
+  theme(plot.title = element_text(face = "bold", size = 20, hjust = 0.5),
+        plot.subtitle= element_text(size = 16, hjust = 0.5),
+        legend.text = element_text(size = 15),
+        legend.title = element_text(face = "bold", size = 16)) +
+  geom_text(aes(y = labelPosition, label = label), x = 3.5, size = 6, color = "black")
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| output: false
+
+# Active patient count by sexual orientation
+sex_or_qry <- "SELECT 
+	CASE 
+		WHEN SEXUAL_ORIENTATION = 'AS' THEN 'Asexual'
+		WHEN SEXUAL_ORIENTATION = 'BI' THEN 'Bisexual'
+		WHEN SEXUAL_ORIENTATION = 'GA' THEN 'Gay'
+		WHEN SEXUAL_ORIENTATION = 'LE' THEN 'Lesbian'
+		WHEN SEXUAL_ORIENTATION = 'MU' THEN 'Multiple'
+		WHEN SEXUAL_ORIENTATION = 'QU' THEN 'Queer'
+		WHEN SEXUAL_ORIENTATION = 'SE' THEN 'Something Else'
+		WHEN SEXUAL_ORIENTATION = 'ST' THEN 'Straight'
+		ELSE 'Unknown'
+	END AS 'sexual_orientation',
+COUNT(DISTINCT PATID) AS sex_orien_pt_ct
+FROM CDM.dbo.DEMOGRAPHIC 
+WHERE SITES = 'OCHIN'
+GROUP BY 	
+	CASE
+		WHEN SEXUAL_ORIENTATION = 'AS' THEN 'Asexual'
+		WHEN SEXUAL_ORIENTATION = 'BI' THEN 'Bisexual'
+		WHEN SEXUAL_ORIENTATION = 'GA' THEN 'Gay'
+		WHEN SEXUAL_ORIENTATION = 'LE' THEN 'Lesbian'
+		WHEN SEXUAL_ORIENTATION = 'MU' THEN 'Multiple'
+		WHEN SEXUAL_ORIENTATION = 'QU' THEN 'Queer'
+		WHEN SEXUAL_ORIENTATION = 'SE' THEN 'Something Else'
+		WHEN SEXUAL_ORIENTATION = 'ST' THEN 'Straight'
+		ELSE 'Unknown'
+END"
+sex_or <- dbGetQuery(conn, sex_or_qry)
+
+sexor_unknown = format(as.integer(sex_or$sex_orien_pt_ct[sex_or$sexual_orientation == 'Unknown']),big.mark=",",scientific=FALSE) # Unknown, No Information or Declined to Answer
+
+condition1 <- sex_or$sexual_orientation != 'Unknown'
+sexor_nonmiss <- sex_or[condition1, ]
+
+sexor_total = format(as.integer(sum(sexor_nonmiss$sex_orien_pt_ct)),big.mark=",",scientific=FALSE)
+sexor_nonmiss$percent = paste0(round(((sexor_nonmiss$sex_orien_pt_ct/sum(sexor_nonmiss$sex_orien_pt_ct))*100),digits=1),"%")
+sexor_nonmiss$label = format(as.integer(sexor_nonmiss$sex_orien_pt_ct),big.mark=",",scientific=FALSE)
+
+sexor_df <- data.frame(sexor_nonmiss$sexual_orientation, sexor_nonmiss$label, sexor_nonmiss$percent)
+sexor_df <- sexor_df[order(sexor_df$sexor_nonmiss.label, decreasing = TRUE), ]
+
+sexor_tbl <- gt(sexor_df)
+
+sexor_tbl <- 
+  sexor_tbl |>
+  tab_header(
+    title = md("**Sexual Orientation**"),
+    subtitle = paste(sexor_unknown, " Unknown, No Information or Declined to Answer.", 
+                     "\nOut of ", sexor_total, " patients for whom we have data:")
+  ) |>
+  cols_label(
+    sexor_nonmiss.sexual_orientation = "",
+    sexor_nonmiss.label = "",
+    sexor_nonmiss.percent = ""
+  ) |>
+  tab_options(table.width = px(170),
+              data_row.padding = px(0.4),
+              summary_row.padding = px(0.4),
+              row_group.padding = px(0.4),
+              table.font.size = px(7L)
+              )
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| output: false
+
+# Active patient count by gender identity
+gen_id_qry <- "SELECT 
+	CASE 
+		WHEN GENDER_IDENTITY = 'F' THEN 'Woman'
+		WHEN GENDER_IDENTITY = 'GQ' THEN 'Genderqueer'
+		WHEN GENDER_IDENTITY = 'M' THEN 'Man'
+		WHEN GENDER_IDENTITY = 'OT' THEN 'Other'
+		WHEN GENDER_IDENTITY = 'SE' THEN 'Something Else'
+		WHEN GENDER_IDENTITY = 'TF' THEN 'Transgender Female'
+		WHEN GENDER_IDENTITY = 'TM' THEN 'Transgender Male'
+		ELSE 'Unknown'
+	END AS 'gender_identity',
+COUNT(DISTINCT PATID) AS gen_id_pt_ct
+FROM CDM.dbo.DEMOGRAPHIC 
+WHERE SITES = 'OCHIN'
+GROUP BY 	
+	CASE
+		WHEN GENDER_IDENTITY = 'F' THEN 'Woman'
+		WHEN GENDER_IDENTITY = 'GQ' THEN 'Genderqueer'
+		WHEN GENDER_IDENTITY = 'M' THEN 'Man'
+		WHEN GENDER_IDENTITY = 'OT' THEN 'Other'
+		WHEN GENDER_IDENTITY = 'SE' THEN 'Something Else'
+		WHEN GENDER_IDENTITY = 'TF' THEN 'Transgender Female'
+		WHEN GENDER_IDENTITY = 'TM' THEN 'Transgender Male'
+		ELSE 'Unknown'
+END"
+gen_id <- dbGetQuery(conn, gen_id_qry)
+
+genid_unknown = format(as.integer(gen_id$gen_id_pt_ct[gen_id$gender_identity == 'Unknown']),big.mark=",",scientific=FALSE) # Unknown, No Information or Declined to Answer
+
+condition2 <- gen_id$gender_identity != 'Unknown'
+genid_nonmiss <- gen_id[condition2, ]
+
+genid_total = format(as.integer(sum(genid_nonmiss$gen_id_pt_ct)),big.mark=",",scientific=FALSE)
+genid_nonmiss$percent = paste0(round(((genid_nonmiss$gen_id_pt_ct/sum(genid_nonmiss$gen_id_pt_ct))*100),digits=1),"%")
+genid_nonmiss$label = format(as.integer(genid_nonmiss$gen_id_pt_ct),big.mark=",",scientific=FALSE)
+
+genid_df <- data.frame(genid_nonmiss$gender_identity, genid_nonmiss$label, genid_nonmiss$percent)
+genid_df <- genid_df[order(genid_df$genid_nonmiss.label, decreasing = TRUE), ]
+
+genid_tbl <- gt(genid_df)
+
+genid_tbl <- 
+  genid_tbl |>
+  tab_header(
+    title = md("**Gender Identity**"),
+    subtitle = paste(genid_unknown, " Unknown, No Information or Declined to Answer.", 
+                     "\nOut of ", genid_total, " patients for whom we have data:")
+  ) |>
+  cols_label(
+    genid_nonmiss.gender_identity = "",
+    genid_nonmiss.label = "",
+    genid_nonmiss.percent = ""
+  ) |>
+  tab_options(table.width = px(170),
+              data_row.padding = px(0.4),
+              summary_row.padding = px(0.4),
+              row_group.padding = px(0.4),
+              table.font.size = px(7L)
+              )
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| output: false
+
+# Active patient count per positive SDH Domain
+sdh_pt_qry <- "SELECT SDH_DOMAIN, COUNT(DISTINCT PATID) AS sdh_patid_cnt
+FROM CDM_STAGING.dbo.OCHIN_PRO_CM_SDH
+WHERE SITEID = 'OCHIN'
+AND SDH_DOMAIN NOT IN ('Help','Individual Domain Button Selected', 'SDH Screening Tool Button Selected')
+AND SDH_POSITIVE_SCREEN = 1
+GROUP BY SDH_DOMAIN
+ORDER BY sdh_patid_cnt DESC"
+sdh_pt <- dbGetQuery(conn, sdh_pt_qry)
+
+sdh_total_qry <- "SELECT COUNT(DISTINCT PATID) AS sdh_patid_cnt
+FROM CDM_STAGING.dbo.OCHIN_PRO_CM_SDH 
+WHERE SITEID = 'OCHIN'
+AND SDH_DOMAIN NOT IN ('Help','Individual Domain Button Selected', 'SDH Screening Tool Button Selected')
+AND SDH_POSITIVE_SCREEN = 1"
+sdh_pt_total <- dbGetQuery(conn, sdh_total_qry)
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| output: false
+
+# SDH screen count bar graph
+sdh_pt_total <- (format(sdh_pt_total,big.mark=",",scientific=FALSE))
+
+sdh_screen_bar <- sdh_pt |>
+  mutate(SDH_DOMAIN = fct_reorder(SDH_DOMAIN, sdh_patid_cnt)) |>
+  ggplot( aes(x = SDH_DOMAIN, y = sdh_patid_cnt)) +
+  geom_bar(stat = "identity", fill = "#568e14", width = .7) +
+  coord_flip() +
+  xlab("") +
+  ylab("") +
+  theme_void() +
+  labs(title="Positive SDH Screens",
+       subtitle = paste0("n = ", sdh_pt_total)) +
+  geom_text(aes(label = format(sdh_patid_cnt,big.mark=",",scientific=FALSE)),hjust = -.4, nudge_y = -5000, size = 4) +
+  scale_y_continuous(expand = expansion(mult = c(.01,0.15))) +
+  theme(axis.text.y = element_text(size = 15),
+        plot.title = element_text(face = "bold", size = 18, hjust = 0.5),
+        plot.subtitle= element_text(size = 15, hjust = 0.5))
+```
+
+```{r echo=FALSE, warning=FALSE, output=FALSE}
+# Active patient count per SDH Domain
+sdh_flag_qry <- "SELECT SDH_DOMAIN, COUNT(DISTINCT PATID) AS sdh_flag_cnt
+FROM CDM_STAGING.dbo.OCHIN_PRO_CM_SDH 
+WHERE SITEID = 'OCHIN'
+AND SDH_DOMAIN NOT IN ('Help','Individual Domain Button Selected', 'SDH Screening Tool Button Selected')
+AND SDH_POSITIVE_SCREEN = 1
+AND SDH_FRS_FLAG = 1
+GROUP BY SDH_DOMAIN
+ORDER BY sdh_flag_cnt DESC"
+sdh_flag <- dbGetQuery(conn, sdh_flag_qry)
+
+sdhflg_total_qry <- "SELECT COUNT(DISTINCT PATID) AS sdh_flag_cnt
+FROM CDM_STAGING.dbo.OCHIN_PRO_CM_SDH 
+WHERE SITEID = 'OCHIN'
+AND SDH_DOMAIN NOT IN ('Help','Individual Domain Button Selected', 'SDH Screening Tool Button Selected')
+AND SDH_POSITIVE_SCREEN = 1
+AND SDH_FRS_FLAG = 1"
+sdh_flag_total <- dbGetQuery(conn, sdhflg_total_qry)
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| output: false
+
+# Bar graph of active patient count per SDH Domain
+sdh_flag_total <- (format(sdh_flag_total,big.mark=",",scientific=FALSE))
+
+sdh_flag_bar <- sdh_flag |>
+  mutate(SDH_DOMAIN = fct_reorder(SDH_DOMAIN, sdh_flag_cnt)) |>
+  ggplot(aes(x = SDH_DOMAIN, y = sdh_flag_cnt)) +
+  geom_bar(stat = "identity", fill = "#42a7a5", width = .8) +
+  coord_flip() +
+  xlab("") +
+  ylab("") +
+  theme_void() +
+  labs(title = "Financial Resource Strains",
+       subtitle = paste0("n = ", sdh_flag_total)) +
+  geom_text(aes(label = format(sdh_flag_cnt,big.mark=",",scientific=FALSE)),hjust = -.1, nudge_x = 0, size = 6)+
+    scale_y_continuous(expand = expansion(mult = c(.01, 0.25)))+
+  theme(axis.text.y = element_text(size = 15),
+        plot.title = element_text(face = "bold", size = 18, hjust = 0.5),
+        plot.subtitle= element_text(size = 15, hjust = 0.5))
+```
+
+<div class="container">
+<span class="br"></span> 
+<span class="br"></span> 
+<div>
+<div class="text">
+OCHIN is a nonprofit health care innovation center with a core mission to advance health equity that operates the most comprehensive and integrated database on primary healthcare and outcomes of safety net patients in the United States.
+                                      
+The OCHIN Research Data Warehouse (RDW) is a unique research resource that aggregates electronic health record (EHR) on over 6 million patients representing a variety of typically underserved and/or under-represented populations. 
+                                      
+With over a decade of highly-curated longitudinal, research-ready ambulatory EHR data conforming to the PCORnet Common Data Model (CDM), the RDW is ideally suited for equity-based approved research projects and preparatory-to-research activities. 
+</div>
+</div>
+
+<div>
+<div class="container-2">
+<div class="plt-1">
+```{r, echo=FALSE, out.width="90%"}
+counts_tbl
+```
+</div>
+<div class="plt-1" style="text-align: center;">
+```{r, echo=FALSE, warning=FALSE, out.width="90%"}
+combined_chart
+```
+</div>
+</div>
+<span class="br-4"></span> 
+
+<div class="container-2">
+<div class="plt-1" style="text-align: center;">
+```{r, echo=FALSE, warning=FALSE, out.width="90%"}
+state_map
+```
+</div>
+<div class="plt-1" style="text-align: center;">
+```{r, echo=FALSE, warning=FALSE, out.width="90%"}
+facility_state_map
+```
+</div>
+</div>
+</div>
+</div>
+
+<br>
+<br>
+<br>
+
+<div class="title-text">
+Key Data Warehouse Metrics 
+</div>
+  
+<div class="text">
+OCHIN’s Research Data Warehouse (RDW) is designed to provide valuable insights, scalable solutions, and drive innovation. With over 5 million active patients across 40+ states, OCHIN’s RDW maintains comprehensive data sets that make it an impactful and resourceful tool. OCHIN RDW data spans across a multitude of healthcare clinics and centers including community health centers, school-based clinics, dental clinics, public health departments, and more! In today's data-driven world, organizations need to harness the full potential of their data to make informed decisions. OCHIN’s RDW provides actionable intelligence to empower researchers through detailed, comprehensive, and HIPAA-compliant electronic health record data.
+</div>
+
+<span class="br"></span> 
+<span class="br"></span> 
+<span class="br"></span> 
+
+<div class="container-2">
+<div class="plt-1" style="text-align: center;">
+```{r, echo=FALSE, out.width="60%"}
+age_groups_bar
+```
+</div>
+
+<div class="plt-1" style="text-align: center;">
+```{r, echo=FALSE, out.width="63%"}
+race_ethnicity_tbl
+```
+</div>
+</div>
+<span class="br-4"></span> 
+
+<div class="container-2">
+<div class="plt-1" style="text-align: center;">
+```{r, echo=FALSE, out.width="60%"}
+lang_type
+```
+</div>
+
+<div class="plt-1" style="text-align: center;">
+```{r, echo=FALSE, out.width="60%"}
+sex_atbirth_donut
+```
+</div>
+</div>
+
+<div class="container-2">
+<div class="plt-1" style="text-align: center;">
+```{r, echo=FALSE, out.width="60%"}
+ins_type
+```
+</div>
+
+<div class="plt-1" style="text-align: center;">
+```{r, echo=FALSE, out.width="60%"}
+chr_c_bar
+```
+</div>
+</div>
+
+<span class="br-2"></span> 
+<span class="br-2"></span> 
+
+<div class="title-text">
+Emerging Data Domains
+</div>
+
+<div class="title-text-2">
+Sexual Orientation and Gender Identity
+</div>
+
+<div class="text">
+Sexual orientation and gender identity (SOGI) are one of the many key data features collected within the OCHIN RDW. SOGI research is a growing area of research and OCHIN is proud to be one of the organizations at the forefront of collecting SOGI data that allows researchers to further their SOGI research. 
+</div>
+
+<span class="br"></span> 
+
+<div class="container-2">
+<div class="plt-1" style="text-align: center;">
+```{r, echo=FALSE, out.width="65%"}
+sexor_tbl
+```
+</div>
+<div class="plt-1" style="text-align: center;">
+```{r, echo=FALSE, out.width="65%"}
+genid_tbl
+```
+</div>
+</div>
+
+<span class="br-2"></span> 
+<span class="br-2"></span> 
+
+<div class="title-text-2">
+Social Needs
+</div>
+
+<div class="center-text">
+Social needs n = distinct non missing data
+</div>
+
+<div class="center-text-1">
+SDH screens have been given to about 15% of patients
+</div>
+
+<span class="br"></span> 
+<span class="br"></span> 
+
+<div class="container-2">
+<div class="plt-1" style="text-align: center;">
+```{r, echo=FALSE, out.width="65%"}
+sdh_screen_bar
+```
+</div>
+<div class="plt-1" style="text-align: center;">
+```{r, echo=FALSE, out.width="65%"}
+sdh_flag_bar
+```
+</div>
+</div>
+
+<span class="br-3"></span> 
+
+<div class="text">
+OCHIN’s Social Drivers of Health (SDOH) metrics help researchers understand where gaps in healthcare exist by understanding the social implications that drive them. With over 1.8 million social screenings including screening domains such as transportation; housing status; food insecurity; financial strain; utilities; stress and isolation; education; employment; and interpersonal violence, OCHIN’s RDW houses detailed analysis of the patients we help our members serve.
+</div>
