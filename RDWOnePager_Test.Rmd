@@ -27,7 +27,6 @@ library(usmap)
 library(odbc)
 library(gt)
 library(ggpubr)
-library(plotly)
 library(kableExtra)
 ```
 
